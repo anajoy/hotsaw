@@ -1,0 +1,130 @@
+#!/bin/sh
+#
+# log-courier Log Courier, a lightweight log shipper with Logstash integration.
+#
+# chkconfig: 2345 90 10
+# description: Controls the Log Courier daemon
+#
+### BEGIN INIT INFO
+# Provides: log-courier
+# Required-Start: $local_fs $remote_fs $syslog
+# Required-Stop: $local_fs $remote_fs $syslog
+# Default-Start: 2 3 5
+# Default-Stop: 0 1 6
+# Short-Description: Log Courier, a lightweight log shipper with Logstash integration.
+### END INIT INFO
+
+# source function library
+. /lib/lsb/init-functions
+. /etc/rc.status
+
+DAEMON='/usr/sbin/log-courier'
+DATA_DIR='/var/lib/log-courier'
+PID_FILE='/var/run/log-courier.pid'
+LOGORGANIZER='/etc/log-courier/bin/log-organizer.sh'
+
+# check if file exists
+  if [ -f /etc/sysconfig/log-courier ]; then
+  . /etc/sysconfig/log-courier
+fi
+
+# set default config file, if $CONFIG_FILE is not set
+if [ -z ${CONFIG_FILE} ]; then
+  CONFIG_FILE='/etc/log-courier/log-courier.conf'
+fi
+
+do_start() {
+  echo -n "Starting Log Courier: "
+  checkproc -v -p $PID_FILE $DAEMON &>/dev/null
+  RC=$?
+  if [ $RC -eq 0 ]; then
+    echo "success"
+  else
+    cd $DATA_DIR
+    nohup ${DAEMON} -config="${CONFIG_FILE}" </dev/null &>/dev/null &
+    RC=$?
+    echo $! > ${PID_FILE}
+    #[ $RC -eq 0 ] && success || failure
+  fi
+  echo $RC
+  return $RC
+}
+
+do_reload() {
+  echo -n "Reloading Log Courier: "
+  killproc -p $PID_FILE $DAEMON -HUP
+  RC=$?
+  echo
+}
+
+do_start_organizer() {
+  echo "Starting log organizer"
+  nohup ${LOGORGANIZER} </dev/null &>/dev/null &
+}
+
+do_stop_organizer() {
+  echo
+  echo "Stopping log organizer"
+  pkill -f ${LOGORGANIZER}
+}
+
+rc_reset
+
+case "$1" in
+  start)
+    $0 configtest && do_start
+    RC=$?
+    do_start_organizer
+  ;;
+  stop)
+    echo -n "Stopping Log Courier: "
+    killproc -p $PID_FILE -t 30 $DAEMON
+    RC=$?
+    do_stop_organizer
+    echo
+  ;;
+  status)
+    echo "Log Courier status:"
+    checkproc -v -p $PID_FILE $DAEMON
+    rc_status -v
+    RC=$?
+  ;;
+  reload)
+    $0 configtest && do_reload
+  ;;
+  restart)
+  $0 configtest
+  RC=$?
+  if [ $RC -eq 0 ]; then
+    $0 stop
+    do_start
+    RC=$?
+  fi
+  ;;
+  condrestart|try-restart)
+    checkproc -v -p $PID_FILE $DAEMON
+    RC=$?
+    if [ $RC -eq 0 ]; then
+      $0 restart
+      RC=$?
+    fi
+  ;;
+  configtest)
+    echo -n "Configuration test: "
+    TESTRESULT=$( ${DAEMON} -config="${CONFIG_FILE}" -config-test )
+    RC=$?
+    if [ $RC -ne 0 ]; then
+      echo "failure"
+      echo
+      echo "${TESTRESULT}"
+    else
+      echo "success"
+      echo
+    fi
+  ;;
+  *)
+    echo "Usage: $0 start|stop|status|reload|restart|condrestart|try-restart|configtest"
+    exit 1
+  ;;
+esac
+exit $RC

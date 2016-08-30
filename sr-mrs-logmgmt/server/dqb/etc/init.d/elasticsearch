@@ -1,0 +1,228 @@
+#!/bin/sh
+# Startup script for the Eleasticsearch
+#
+# processname: java
+# pidfile: /var/run/elasticsearch.pid
+# config: /etc/elasticsearch/elasticsearch.yml
+#
+### BEGIN INIT INFO
+# Provides: Elasticsearch
+# Required-Start: $network $named $remote_fs $syslog
+# Required-Stop: $network $named $remote_fs $syslog
+# Default-Start: 2 3 5
+# Default-Stop: 0 1 6
+# Short-Description: This service manages the elasticsearch daemon
+# Description: Starts elasticsearch as a deamon
+### END INIT INFO
+
+ES_USER=deploy
+ES_GROUP=deploy
+ES_NODE_NAME=dq001b
+ES_OPEN_FILES=32768
+ES_LOCKED_MEMORY=unlimited
+ES_MAX_MEMORY=unlimited
+ES_VIRT_MEMORY=unlimited
+# keep max heap low for master node with no data
+export ES_HEAP_SIZE=768m
+ES_NODE=1
+ES_NODES=`ls /opt/mas/nodes/${ES_NODE_NAME}-node*/elasticsearch/etc/elasticsearch.yml | wc -w`
+ES_BASEDIR=/opt/mas/nodes
+ES_BIN=elasticsearch/bin/elasticsearch
+ES_CONF=elasticsearch/etc/elasticsearch.yml
+ES_PID=elasticsearch/run/elasticsearch.pid
+PROCESS=java
+# changes location and options for JVM core and dumps
+# http://www-01.ibm.com/support/knowledgecenter/SSYKE2_7.0.0/com.ibm.java.lnx.70.doc/diag/tools/dumpagents_env.html?lang=en
+JAVA_DUMP_OPTS="ONANYSIGNAL(NONE),ONOUTOFMEMORY(JAVADUMP[1],HEAPDUMP[1]),ONDUMP(JAVADUMP[5],HEAPDUMP[5])"
+export JAVA_DUMP_OPTS
+JAVA_OPTS="$JAVA_OPTS -XX:HeapDumpPath=/opt/mas/logs/heapdump.hprof"
+export JAVA_OPTS
+
+#MASTER
+ES_MST_BIN=/usr/share/elasticsearch/bin/elasticsearch
+ES_MST_PID=/var/run/elasticsearch/elasticsearch.pid
+ES_MST_CONF=/etc/elasticsearch/elasticsearch.yml
+
+start() {
+    # check, if elasticsearch is already running
+    if [ `pgrep -c -f org.elasticsearch.bootstrap.Elasticsearch` -gt 0 ]
+    then
+      echo "elasticsearch is already running!"
+      RETVAL=1
+    else
+      # set kernel params and ulimit as (root, presumably) first, before we drop privileges
+      # /sbin/sysctl -w vm.max_map_count=262144 # setting transferred to /etc/sysctl.conf
+      ulimit -n ${ES_OPEN_FILES}
+      ulimit -H -l ${ES_LOCKED_MEMORY}
+      ulimit -H -m ${ES_MAX_MEMORY}
+      ulimit -H -v ${ES_VIRT_MEMORY}
+      ##uncomment to log hard ulimit 
+      ulimit -aH > /tmp/es_H_ulimit.out
+      # start master	
+      echo "starting elasticsearch..."
+      chroot --userspec $ES_USER:$ES_GROUP / sh -c "
+        ulimit -n ${ES_OPEN_FILES}
+        ulimit -l ${ES_LOCKED_MEMORY}
+        ulimit -m ${ES_MAX_MEMORY}
+        ulimit -v ${ES_VIRT_MEMORY}
+        ##uncomment to log soft ulimit 
+        ulimit -a > /tmp/es_s_ulimit.out
+        $ES_MST_BIN -d -p $ES_MST_PID -Des.config=$ES_MST_CONF
+      " &
+      sleep 10
+    
+      # start all configured nodes (if any)
+      # increase max heap for data nodes only
+      export ES_HEAP_SIZE=2560m
+      until [ $ES_NODE -gt $ES_NODES ]
+      do
+        NODEDIR=$ES_BASEDIR/${ES_NODE_NAME}-node${ES_NODE}
+        chroot --userspec $ES_USER:$ES_GROUP / sh -c "
+          ulimit -n ${ES_OPEN_FILES}
+          ulimit -l ${ES_LOCKED_MEMORY}
+          ulimit -m ${ES_MAX_MEMORY}
+          ulimit -v ${ES_VIRT_MEMORY}
+          $NODEDIR/$ES_BIN -d -p $NODEDIR/$ES_PID -Des.config=$NODEDIR/$ES_CONF
+        " &
+        sleep 10
+        ES_NODE=`expr $ES_NODE + 1`
+      done
+
+      # reset
+      ES_NODE=1
+
+      # check status
+      status
+      rm -f /tmp/es_codes /tmp/es_messages
+      if [ $RETVAL -eq 0 ]
+      then
+        echo "rc $RETVAL (started)"
+      else 
+        echo "rc $RETVAL, start failed!"
+      fi
+ 
+    fi
+}
+
+stop() {
+    echo "stopping elasticsearch..."
+    # stop all configured nodes (if any) and master
+    until [ $ES_NODE -gt $ES_NODES ]
+    do
+      NODEDIR=$ES_BASEDIR/${ES_NODE_NAME}-node${ES_NODE}
+      [ -f $NODEDIR/$ES_PID ] && cat $NODEDIR/$ES_PID >> /tmp/es_pids
+      [ -f /tmp/es_pids ] && printf " " >> /tmp/es_pids
+      ES_NODE=`expr $ES_NODE + 1`
+    done  
+
+    [ -f $ES_MST_PID ] && cat "$ES_MST_PID" >> /tmp/es_pids
+    
+    [ -f /tmp/es_pids ] && kill -TERM `cat /tmp/es_pids`
+    RETVAL=$?
+
+    ## to escalate, if processes exist
+    sleep 10
+    pgrep  -f org.elasticsearch.bootstrap.Elasticsearch >/dev/null && RETVAL=2
+    if [ $RETVAL -le 1 ]
+    then
+      [ $RETVAL -eq 1 ] && echo "rc $RETVAL (already stopped or no pidfile)"
+      [ $RETVAL -eq 0 ] && echo "rc $RETVAL (stopped)"
+    else
+      [ $RETVAL -gt 1 ] && echo "rc $RETVAL (processes will be terminated or killed)"
+      pkill -f org.elasticsearch.bootstrap.Elasticsearch
+      sleep 10
+      pkill -9 -f org.elasticsearch.bootstrap.Elasticsearch
+    fi
+    ##    
+
+    # resets for start
+    ES_NODE=1
+    [ -f /tmp/es_pids ] && rm -f /tmp/es_pids
+}
+
+restart(){
+    stop
+    start
+}
+
+status() {
+
+    #check status of all configured nodes (if any)
+    until [ $ES_NODE -gt $ES_NODES ]
+    do
+      NODEDIR=$ES_BASEDIR/${ES_NODE_NAME}-node${ES_NODE}
+      echo $NODEDIR/$ES_PID >> /tmp/es_ls_pidfiles
+      ES_NODE=`expr $ES_NODE + 1`
+    done  
+    # reset
+    # cat /tmp/es_ls_pidfiles    
+    ES_NODE=1
+    
+    for PID_LS_FILE in `cat /tmp/es_ls_pidfiles`
+    do
+      if [ -f "$PID_LS_FILE" ] ; then
+        pid=`cat "$PID_LS_FILE"`
+          if kill -0 $pid > /dev/null 2> /dev/null ; then
+          echo "node${ES_NODE} is running" >> /tmp/es_messages
+          printf "0" >> /tmp/es_codes
+        else
+          echo "node${ES_NODE} is dead but pid file exists" >> /tmp/es_messages
+          printf "2" >> /tmp/es_codes 
+        fi
+      else
+        echo "node${ES_NODE} is not running" >> /tmp/es_messages
+        printf "1" >> /tmp/es_codes
+      fi
+      ES_NODE=`expr $ES_NODE + 1`
+    done
+
+    # reset
+    ES_NODE=1
+    rm -f /tmp/es_ls_pidfiles
+    
+    #check master node
+    if [ -f "$ES_MST_PID" ] ; then
+      pid=`cat "$ES_MST_PID"`
+      if kill -0 $pid > /dev/null 2> /dev/null ; then
+        echo "master is running" >> /tmp/es_messages
+        printf "0" >> /tmp/es_codes
+      else
+        echo "master is dead but pid file exists" >> /tmp/es_messages
+        printf "2" >> /tmp/es_codes 
+      fi
+    else
+      echo "master is not running" >> /tmp/es_messages
+      printf "1" >> /tmp/es_codes
+    fi
+    
+    RETVAL=`cat /tmp/es_codes`
+    return $RETVAL
+
+}
+
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    status)
+        status
+        code=$?
+        cat /tmp/es_messages
+        cat /tmp/es_codes
+        echo
+        rm -f /tmp/es_codes /tmp/es_messages
+        exit $code
+        ;;
+
+    *)
+        echo "Usage: $0 [start|stop|restart|status]"
+esac
+
+exit $RETVAL

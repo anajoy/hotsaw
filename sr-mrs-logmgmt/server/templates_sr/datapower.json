@@ -1,0 +1,63 @@
+{
+  "template" : "wdp-*",
+  "settings" : {
+    "index.refresh_interval" : "5s"
+  },
+  "mappings": {
+        "tags": {
+            "type": "string"
+        },
+        "host": {
+            "analyzer": "whitespace",
+            "type": "string"
+        },
+        "direction": {
+            "type": "string"
+        },
+        "severity": {
+            "type": "string"
+        },
+        "type": {
+            "type": "string"
+        },
+        "transactionID": {
+            "type": "string"
+        },
+        "serviceType": {
+            "type": "string"
+        },
+        "@version": {
+            "type": "string"
+        },
+        "serviceName": {
+            "analyzer": "whitespace",
+            "type": "string"
+        },
+        "message": {
+            "type": "string"
+        },
+        "@timestamp": {
+            "format": "dateOptionalTime",
+            "type": "date"
+        },
+        "logCategory": {
+            "type": "string"
+        },
+        "logLevel": {
+            "type": "string"
+        },
+        "domain": {
+            "analyzer": "whitespace",
+            "type": "string"
+        },
+        "service": {
+            "type": "string"
+        },
+        "serviceIP": {
+            "type": "string"
+        },
+	"globalTransactionID": {
+	    "type": "string"
+	}
+    }
+}

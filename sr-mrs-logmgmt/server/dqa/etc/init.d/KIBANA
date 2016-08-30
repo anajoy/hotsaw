@@ -1,0 +1,76 @@
+#!/bin/sh
+# Startup script for Kibana
+#
+# processname: java
+
+### BEGIN INIT INFO
+# Provides: Kibana
+# Required-Start: $network $elasticsearch
+# Required-Stop: $network $elasticsearch
+# Default-Start: 2 3 5
+# Default-Stop: 0 1 6
+# Short-Description: This service manages the kibana backend
+# Description: Starts Kibana backend
+### END INIT INFO
+
+KB_USER=deploy
+KB_GROUP=deploy
+
+startkb() {
+    if [ `pgrep -c -f /opt/mas/kibana/bin/` -gt 0 ]
+    then
+      echo "kibana is already running!"
+    else
+      # start kibana    
+      echo "starting kibana backend..."
+      chroot --userspec $KB_USER:$KB_GROUP / sh -c "
+        /opt/mas/kibana/bin/kibana > /opt/mas/logs/kibana/kibana.stdout 2> /opt/mas/logs/kibana/kibana.err
+      " &
+    fi
+}
+
+stopkb() {
+      pkill -f /opt/mas/kibana/bin/
+}
+
+restart(){
+    stopkb
+    status
+    startkb
+    status
+}
+
+status() {
+    if [ `pgrep -c -f /opt/mas/kibana/bin/` -gt 0 ]
+    then
+      echo "kibana is running"
+    else
+      echo "kibana is stopped"  
+    fi
+}
+
+case "$1" in
+    start)
+        ##starts kibana
+        startkb
+        status
+        ;;
+    stop)
+        ##stops kibana
+        stopkb
+        status
+        ;;
+    restart)
+        restart
+        ;;
+    status)
+        status
+        code=$?
+        exit $code
+        ;;
+
+    *)
+        echo "Usage: $0 [start|stop|restart|status]"
+esac
+
+exit $?

@@ -1,0 +1,4 @@
+# Custom Swiss Re
+TZ_US (?:[PMCE][SD]T|UTC)
+TZ_EU (?:[WGCE][EDM][S]?[T])
+TZ_C %{TZ_US}|%{TZ_EU}
